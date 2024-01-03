@@ -24,9 +24,11 @@ from os import environ
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mangum import Mangum
 from pydantic import BaseModel, EmailStr
+from starlette.status import HTTP_403_FORBIDDEN
 
 REGION = environ["REGION"]
 CLIENT_ID = environ["CLIENT_ID"]
@@ -56,41 +58,40 @@ class LoginRequestBody(BaseModel):
     password: str
 
 
-def authenticate_user(credentials: LoginRequestBody):
+http_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def get_token(
+    http_auth_credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer_scheme),
+) -> str:
+    """Utility function to extract the bearer token from the HTTP Authorization
+    header.
+
+    This function is intended to be used with the `Depends` mechanism, for
+    example:
+
+    .. code-block:: python
+
+        @app.get("/users/me")
+        async def read_user_me(token: str = Depends(get_token))):
+            return {"token": token}
+
+    :param http_auth_credentials: The HTTP Authorization credentials.
+    :return: The extracted bearer token.
+    :raises HTTPException: If the HTTP Authorization credentials are missing.
     """
-    Authenticates a user using Amazon Cognito User Pools.
+    # Check if HTTP Authorization credentials are provided
+    if http_auth_credentials is None:
+        # If not provided, raise an HTTPException with 403 status code
+        # This means "Forbidden" - the user is not authenticated
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Not authenticated")
 
-    Parameters:
-    - `credentials`: An instance of the LoginRequestBody class containing user email and password.
+    # Using the walrus operator (:=) to both assert the type of http_auth_credentials.credentials
+    # and assign it to the variable 'credentials'
+    assert isinstance(credentials := http_auth_credentials.credentials, str)
 
-    Returns:
-    - A dictionary with tokens upon successful authentication.
-    - A dictionary with an "error" key containing an error message if authentication fails.
-    """
-
-    try:
-        initiate_auth_response = cognito_idp.initiate_auth(
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={
-                "USERNAME": credentials.email,
-                "PASSWORD": credentials.password,
-            },
-            ClientId=CLIENT_ID,
-        )
-
-    except ClientError as e:
-        if (
-            e.response["Error"]["Code"] == "NotAuthorizedException"
-            or e.response["Error"]["Code"] == "UserNotFoundException"
-        ):
-            return {"error": e.response["Error"]["Message"]}
-        raise
-
-    return {
-        "id_token": initiate_auth_response["AuthenticationResult"]["IdToken"],
-        "refresh_token": initiate_auth_response["AuthenticationResult"]["RefreshToken"],
-        "access_token": initiate_auth_response["AuthenticationResult"]["AccessToken"],
-    }
+    # Return the extracted bearer token
+    return credentials
 
 
 class PasswordChangeRequestBody(BaseModel):
@@ -98,26 +99,25 @@ class PasswordChangeRequestBody(BaseModel):
     proposed_password: str
 
 
-def password_change(credentials: LoginRequestBody, body: PasswordChangeRequestBody):
+def password_change(
+    body: PasswordChangeRequestBody,
+    access_token: str = Depends(get_token),
+):
     """
     Changes the user's password using Amazon Cognito User Pools.
 
     Parameters:
-    - `credentials`: An instance of the LoginRequestBody class containing user email and password.
     - `body`: An instance of the PasswordChangeRequestBody class containing previous and proposed passwords.
 
     Returns:
     - The HTTP status code indicating the result of the password change.
     - A dictionary with an "error" key containing an error message if password change fails.
     """
-
-    tokens = authenticate_user(credentials)
-
     try:
         response = cognito_idp.change_password(
             PreviousPassword=body.previous_password,
             ProposedPassword=body.proposed_password,
-            AccessToken=tokens["access_token"],
+            AccessToken=access_token,
         )
 
     except ClientError as e:
@@ -132,27 +132,26 @@ class UpdateNameRequestBody:
     new_name: str
 
 
-def update_user_attribute_name(credentials: LoginRequestBody, update_name: UpdateNameRequestBody):
+def update_user_attribute_name(
+    update_name: UpdateNameRequestBody,
+    access_token: str = Depends(get_token),
+):
     """
     Updates the user's name attribute in Amazon Cognito User Pools.
 
     Parameters:
-    - `credentials`: An instance of the LoginRequestBody class containing user email and password.
     - `update_name`: An instance of the UpdateNameRequestBody class containing the new name.
 
     Returns:
     - The HTTP status code indicating the result of the name update.
     - A dictionary with an "error" key containing an error message if the update fails.
     """
-
-    tokens = authenticate_user(credentials)
-
     try:
         response = cognito_idp.update_user_attributes(
             UserAttributes=[
                 {"Name": "name", "Value": update_name.new_name},
             ],
-            AccessToken=tokens["access_token"],
+            AccessToken=access_token,
         )
 
     except ClientError as e:
@@ -166,13 +165,13 @@ class UpdateEmailRequestBody:
 
 
 def update_user_attribute_email(
-    credentials: LoginRequestBody, update_email: UpdateEmailRequestBody
+    update_email: UpdateEmailRequestBody,
+    access_token: str = Depends(get_token),
 ):
     """
     Updates the user's email attribute in Amazon Cognito User Pools.
 
     Parameters:
-    - `credentials`: An instance of the LoginRequestBody class containing user email and password.
     - `update_email`: An instance of the UpdateEmailRequestBody class containing the new email.
 
     Returns:
@@ -180,14 +179,12 @@ def update_user_attribute_email(
     - A dictionary with an "error" key containing an error message if the update fails.
     """
 
-    tokens = authenticate_user(credentials)
-
     try:
         response = cognito_idp.update_user_attributes(
             UserAttributes=[
                 {"Name": "email", "Value": update_email.new_email},
             ],
-            AccessToken=tokens["access_token"],
+            AccessToken=access_token,
         )
 
     except ClientError as e:
@@ -200,26 +197,25 @@ class VerifyUserAttribute:
     confirmation_code: str
 
 
-def verify_user_attribute_email(credentials: LoginRequestBody, code: VerifyUserAttribute):
+def verify_user_attribute_email(
+    code: VerifyUserAttribute,
+    access_token: str = Depends(get_token),
+):
     """
     Verifies the user's email attribute in Amazon Cognito User Pools.
 
     Parameters:
-    - `credentials`: An instance of the LoginRequestBody class containing user email and password.
     - `code`: An instance of the VerifyUserAttribute class containing the confirmation code.
 
     Returns:
     - The HTTP status code indicating the result of the email verification.
     - A dictionary with an "error" key containing an error message if the verification fails.
     """
-
-    tokens = authenticate_user(credentials)
-
     try:
         response = cognito_idp.verify_user_attribute(
             AttributeName="email",
             Code=code.confirmation_code,
-            AccessToken=tokens["access_token"],
+            AccessToken=access_token,
         )
 
     except ClientError as e:
