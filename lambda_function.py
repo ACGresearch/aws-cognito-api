@@ -28,7 +28,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mangum import Mangum
 from pydantic import BaseModel, EmailStr
-from starlette.status import HTTP_403_FORBIDDEN
+from starlette.status import HTTP_403_FORBIDDEN, HTTP_422_UNPROCESSABLE_ENTITY
 
 REGION = environ["REGION"]
 CLIENT_ID = environ["CLIENT_ID"]
@@ -122,7 +122,10 @@ def password_change(
 
     except ClientError as e:
         if e.response["Error"]["Code"] == "InvalidPasswordException":
-            return {"error": e.response["Error"]["Message"]}
+            raise HTTPException(
+                status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=e.response["Error"]["Message"],
+            )
         raise
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
@@ -155,7 +158,10 @@ def update_user_attribute_name(
         )
 
     except ClientError as e:
-        return {"error": str(e)}
+        raise HTTPException(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.response["Error"]["Message"],
+        )
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
 
@@ -188,7 +194,10 @@ def update_user_attribute_email(
         )
 
     except ClientError as e:
-        return {"error": str(e)}
+        raise HTTPException(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.response["Error"]["Message"],
+        )
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
 
@@ -219,7 +228,10 @@ def verify_user_attribute_email(
         )
 
     except ClientError as e:
-        return {"error": str(e)}
+        raise HTTPException(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=e.response["Error"]["Message"],
+        )
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
 
