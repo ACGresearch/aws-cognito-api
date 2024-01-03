@@ -2,3 +2,4 @@ boto3
 email-validator
 fastapi
 mangum
+sentry_sdk

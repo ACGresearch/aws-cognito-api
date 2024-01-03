@@ -5,14 +5,25 @@
 # No part of this file may be copied, modified, sold, distributed, or used in any
 # way without the written permission of ACG Business Analytics Inc.
 #
+from os import environ
 
-import os
 import boto3
 from botocore.exceptions import ClientError
 from pydantic import BaseModel, EmailStr
 
-REGION = os.environ["REGION"]
-CLIENT_ID = os.environ["CLIENT_ID"]
+REGION = environ["REGION"]
+CLIENT_ID = environ["CLIENT_ID"]
+
+# Initialize Sentry
+if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
+    import sentry_sdk
+    from sentry_sdk.integrations.aws_lambda import AwsLambdaIntegration
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[AwsLambdaIntegration(timeout_warning=True)],
+        traces_sample_rate=environ.get("SENTRY_TRACES_SAMPLE_RATE", 1.0),
+        profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
+    )
 
 
 class LoginRequestBody(BaseModel):
