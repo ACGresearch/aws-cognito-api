@@ -19,7 +19,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-
+from contextlib import contextmanager
 from os import environ
 from typing import Self
 
@@ -58,6 +58,49 @@ app = FastAPI(
 )
 
 http_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@contextmanager
+def cognito_idp_exception_handler():
+    """Context manager to handle exceptions raised by the Cognito Identity Provider.
+
+    This context manager catches `botocore.exceptions.ClientError` and
+    translates them into appropriate HTTP exceptions.
+
+    :raises HTTPException: If the exception is a 'NotAuthorizedException',
+        it raises a 403 Forbidden error. For all other exceptions, it raises
+        a 422 Unprocessable Entity error.
+
+    Example usage:
+
+    .. code-block:: python
+
+        with cognito_idp_exception_handler():
+            response = client.method()
+
+    All exceptions raised by the Cognito Identity Provider client within
+    the context will be caught and handled appropriately.
+
+    Note that this context manager is specific to the Cognito Identity Provider
+    and will not catch exceptions from other AWS services.
+
+    :return: None
+    """
+    try:
+        yield
+    except ClientError as e:
+        # Check the error code to determine the appropriate HTTP status code
+        # and error message to raise.
+        match e.response["Error"]["Code"]:
+            case "NotAuthorizedException":
+                status_code = HTTP_403_FORBIDDEN
+            case _:
+                status_code = HTTP_422_UNPROCESSABLE_ENTITY
+
+        raise HTTPException(
+            status_code=status_code,
+            detail=e.response["Error"]["Message"],
+        ) from None
 
 
 def get_token(
@@ -125,7 +168,7 @@ async def update_user(body: PatchUserRequestBody = Body(), access_token: str = D
     If the proposed_password is not provided, it will update the user's name
     and/or email.
     """
-    try:
+    with cognito_idp_exception_handler():
         # Check if proposed_password is provided
         if body.proposed_password is not None:
             # If proposed_password is provided, change the user's password
@@ -148,12 +191,6 @@ async def update_user(body: PatchUserRequestBody = Body(), access_token: str = D
                 UserAttributes=user_attributes,
                 AccessToken=access_token,
             )
-    except ClientError as e:
-        # If there is an error, raise an HTTPException with the error message
-        raise HTTPException(
-            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.response["Error"]["Message"],
-        ) from None
 
     # Return a response with status code 204 (No Content) on success
     return Response(status_code=204)
@@ -169,22 +206,11 @@ async def verify_user_attribute_email(
     access_token: str = Depends(get_token),
 ):
     """Verifies the user's email attribute in Amazon Cognito User Pools."""
-    # The code in this try block calls the Cognito API to verify the user's
-    # email attribute. If the verification fails, it raises a ClientError.
-    # This error is caught in the except block and converted to an HTTPException
-    # with a status code of 422. If the verification succeeds, a 204 No Content
-    # response is returned.
-    try:
+    with cognito_idp_exception_handler():
         cognito_idp.verify_user_attribute(
             AttributeName="email",
             Code=code.confirmation_code,
             AccessToken=access_token,
-        )
-
-    except ClientError as e:
-        raise HTTPException(
-            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.response["Error"]["Message"],
         )
 
     return Response(status_code=204)
