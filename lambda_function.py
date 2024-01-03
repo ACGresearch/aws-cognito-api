@@ -21,13 +21,15 @@
 # SOFTWARE.
 
 from os import environ
+from typing import Self
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from mangum import Mangum
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, model_validator
+from starlette.responses import Response
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_422_UNPROCESSABLE_ENTITY
 
 REGION = environ["REGION"]
@@ -50,13 +52,10 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
 cognito_idp = boto3.client("cognito-idp", region_name=REGION)
 
 # Initialize FastAPI
-app = FastAPI()
-
-
-class LoginRequestBody(BaseModel):
-    email: EmailStr
-    password: str
-
+app = FastAPI(
+    title="AWS Cognito API",
+    docs_url="/",
+)
 
 http_bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -94,134 +93,89 @@ def get_token(
     return credentials
 
 
-class PasswordChangeRequestBody(BaseModel):
-    previous_password: str
-    proposed_password: str
+class PatchUserRequestBody(BaseModel):
+    previous_password: str | None = None
+    proposed_password: str | None = None
+    new_name: str | None = None
+    new_email: EmailStr | None = None
+
+    @model_validator(mode="after")
+    def check_attribute_combination(self) -> Self:
+        if self.proposed_password is not None:
+            if self.previous_password is None:
+                raise ValueError("previous password is required")
+            if self.new_name is not None or self.new_email is not None:
+                raise ValueError("cannot change name or email when changing password")
+        else:
+            if self.new_name is None and self.new_email is None:
+                raise ValueError("at least one of name or email is required")
+            if self.previous_password is not None:
+                raise ValueError(
+                    "previous password should only be specified when changing password"
+                )
+        return self
 
 
-def password_change(
-    body: PasswordChangeRequestBody,
-    access_token: str = Depends(get_token),
-):
-    """
-    Changes the user's password using Amazon Cognito User Pools.
+@app.patch("/user", status_code=204)
+async def update_user(body: PatchUserRequestBody = Body(), access_token: str = Depends(get_token)):
+    """Update user attributes.
 
-    Parameters:
-    - `body`: An instance of the PasswordChangeRequestBody class containing previous and proposed passwords.
-
-    Returns:
-    - The HTTP status code indicating the result of the password change.
-    - A dictionary with an "error" key containing an error message if password change fails.
+    This end point updates the user attributes like name, email, and password.
+    If the proposed_password is provided, it will change the user's password.
+    If the proposed_password is not provided, it will update the user's name
+    and/or email.
     """
     try:
-        response = cognito_idp.change_password(
-            PreviousPassword=body.previous_password,
-            ProposedPassword=body.proposed_password,
-            AccessToken=access_token,
-        )
-
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "InvalidPasswordException":
-            raise HTTPException(
-                status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=e.response["Error"]["Message"],
+        # Check if proposed_password is provided
+        if body.proposed_password is not None:
+            # If proposed_password is provided, change the user's password
+            cognito_idp.change_password(
+                PreviousPassword=body.previous_password,
+                ProposedPassword=body.proposed_password,
+                AccessToken=access_token,
             )
-        raise
-
-    return response["ResponseMetadata"]["HTTPStatusCode"]
-
-
-class UpdateNameRequestBody:
-    new_name: str
-
-
-def update_user_attribute_name(
-    update_name: UpdateNameRequestBody,
-    access_token: str = Depends(get_token),
-):
-    """
-    Updates the user's name attribute in Amazon Cognito User Pools.
-
-    Parameters:
-    - `update_name`: An instance of the UpdateNameRequestBody class containing the new name.
-
-    Returns:
-    - The HTTP status code indicating the result of the name update.
-    - A dictionary with an "error" key containing an error message if the update fails.
-    """
-    try:
-        response = cognito_idp.update_user_attributes(
-            UserAttributes=[
-                {"Name": "name", "Value": update_name.new_name},
-            ],
-            AccessToken=access_token,
-        )
-
+        else:
+            # If proposed_password is not provided, update user's name and/or email
+            user_attributes = []
+            if body.new_name is not None:
+                # If new_name is provided, add it to the user_attributes list
+                user_attributes.append({"Name": "name", "Value": body.new_name})
+            if body.new_email is not None:
+                # If new_email is provided, add it to the user_attributes list
+                user_attributes.append({"Name": "email", "Value": body.new_email})
+            # Update the user attributes
+            cognito_idp.update_user_attributes(
+                UserAttributes=user_attributes,
+                AccessToken=access_token,
+            )
     except ClientError as e:
+        # If there is an error, raise an HTTPException with the error message
         raise HTTPException(
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
             detail=e.response["Error"]["Message"],
-        )
+        ) from None
 
-    return response["ResponseMetadata"]["HTTPStatusCode"]
-
-
-class UpdateEmailRequestBody:
-    new_email: str
+    # Return a response with status code 204 (No Content) on success
+    return Response(status_code=204)
 
 
-def update_user_attribute_email(
-    update_email: UpdateEmailRequestBody,
-    access_token: str = Depends(get_token),
-):
-    """
-    Updates the user's email attribute in Amazon Cognito User Pools.
-
-    Parameters:
-    - `update_email`: An instance of the UpdateEmailRequestBody class containing the new email.
-
-    Returns:
-    - The HTTP status code indicating the result of the email update.
-    - A dictionary with an "error" key containing an error message if the update fails.
-    """
-
-    try:
-        response = cognito_idp.update_user_attributes(
-            UserAttributes=[
-                {"Name": "email", "Value": update_email.new_email},
-            ],
-            AccessToken=access_token,
-        )
-
-    except ClientError as e:
-        raise HTTPException(
-            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.response["Error"]["Message"],
-        )
-
-    return response["ResponseMetadata"]["HTTPStatusCode"]
-
-
-class VerifyUserAttribute:
+class PostConfirmRequestBody(BaseModel):
     confirmation_code: str
 
 
-def verify_user_attribute_email(
-    code: VerifyUserAttribute,
+@app.post("/user/confirm", status_code=204)
+async def verify_user_attribute_email(
+    code: PostConfirmRequestBody,
     access_token: str = Depends(get_token),
 ):
-    """
-    Verifies the user's email attribute in Amazon Cognito User Pools.
-
-    Parameters:
-    - `code`: An instance of the VerifyUserAttribute class containing the confirmation code.
-
-    Returns:
-    - The HTTP status code indicating the result of the email verification.
-    - A dictionary with an "error" key containing an error message if the verification fails.
-    """
+    """Verifies the user's email attribute in Amazon Cognito User Pools."""
+    # The code in this try block calls the Cognito API to verify the user's
+    # email attribute. If the verification fails, it raises a ClientError.
+    # This error is caught in the except block and converted to an HTTPException
+    # with a status code of 422. If the verification succeeds, a 204 No Content
+    # response is returned.
     try:
-        response = cognito_idp.verify_user_attribute(
+        cognito_idp.verify_user_attribute(
             AttributeName="email",
             Code=code.confirmation_code,
             AccessToken=access_token,
@@ -233,9 +187,10 @@ def verify_user_attribute_email(
             detail=e.response["Error"]["Message"],
         )
 
-    return response["ResponseMetadata"]["HTTPStatusCode"]
+    return Response(status_code=204)
 
 
+# Setup lambda handler
 lambda_handler = Mangum(app, lifespan="off")
 
 if __name__ == "__main__":
