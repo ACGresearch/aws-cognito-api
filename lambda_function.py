@@ -9,10 +9,13 @@ from os import environ
 
 import boto3
 from botocore.exceptions import ClientError
+from fastapi import FastAPI
+from mangum import Mangum
 from pydantic import BaseModel, EmailStr
 
 REGION = environ["REGION"]
 CLIENT_ID = environ["CLIENT_ID"]
+
 
 # Initialize Sentry
 if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
@@ -25,6 +28,10 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
         traces_sample_rate=environ.get("SENTRY_TRACES_SAMPLE_RATE", 1.0),
         profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
     )
+
+
+# Initialize FastAPI
+app = FastAPI()
 
 
 class LoginRequestBody(BaseModel):
@@ -208,3 +215,12 @@ def verify_user_attribute_email(credentials: LoginRequestBody, code: VerifyUserA
         return {"error": str(e)}
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
+
+
+lambda_handler = Mangum(app, lifespan="off")
+
+if __name__ == "__main__":
+    # noinspection PyPackageRequirements
+    import uvicorn
+
+    uvicorn.run(app)
