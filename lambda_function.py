@@ -18,6 +18,7 @@ CLIENT_ID = environ["CLIENT_ID"]
 if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
     import sentry_sdk
     from sentry_sdk.integrations.aws_lambda import AwsLambdaIntegration
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         integrations=[AwsLambdaIntegration(timeout_warning=True)],
@@ -110,9 +111,7 @@ class UpdateNameRequestBody:
     new_name: str
 
 
-def update_user_attribute_name(
-    credentials: LoginRequestBody, update_name: UpdateNameRequestBody
-):
+def update_user_attribute_name(credentials: LoginRequestBody, update_name: UpdateNameRequestBody):
     """
     Updates the user's name attribute in Amazon Cognito User Pools.
 
@@ -182,9 +181,7 @@ class VerifyUserAttribute:
     confirmation_code: str
 
 
-def verify_user_attribute_email(
-    credentials: LoginRequestBody, code: VerifyUserAttribute
-):
+def verify_user_attribute_email(credentials: LoginRequestBody, code: VerifyUserAttribute):
     """
     Verifies the user's email attribute in Amazon Cognito User Pools.
 
@@ -211,4 +208,3 @@ def verify_user_attribute_email(
         return {"error": str(e)}
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
-
