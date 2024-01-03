@@ -29,6 +29,8 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
         profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
     )
 
+# Initialize Amazon Cognito User Pools
+cognito_idp = boto3.client("cognito-idp", region_name=REGION)
 
 # Initialize FastAPI
 app = FastAPI()
@@ -51,10 +53,8 @@ def authenticate_user(credentials: LoginRequestBody):
     - A dictionary with an "error" key containing an error message if authentication fails.
     """
 
-    client = boto3.client("cognito-idp", region_name=REGION)
-
     try:
-        initiate_auth_response = client.initiate_auth(
+        initiate_auth_response = cognito_idp.initiate_auth(
             AuthFlow="USER_PASSWORD_AUTH",
             AuthParameters={
                 "USERNAME": credentials.email,
@@ -99,8 +99,7 @@ def password_change(credentials: LoginRequestBody, body: PasswordChangeRequestBo
     tokens = authenticate_user(credentials)
 
     try:
-        client = boto3.client("cognito-idp", region_name=REGION)
-        response = client.change_password(
+        response = cognito_idp.change_password(
             PreviousPassword=body.previous_password,
             ProposedPassword=body.proposed_password,
             AccessToken=tokens["access_token"],
@@ -134,8 +133,7 @@ def update_user_attribute_name(credentials: LoginRequestBody, update_name: Updat
     tokens = authenticate_user(credentials)
 
     try:
-        client = boto3.client("cognito-idp", region_name=REGION)
-        response = client.update_user_attributes(
+        response = cognito_idp.update_user_attributes(
             UserAttributes=[
                 {"Name": "name", "Value": update_name.new_name},
             ],
@@ -170,8 +168,7 @@ def update_user_attribute_email(
     tokens = authenticate_user(credentials)
 
     try:
-        client = boto3.client("cognito-idp", region_name=REGION)
-        response = client.update_user_attributes(
+        response = cognito_idp.update_user_attributes(
             UserAttributes=[
                 {"Name": "email", "Value": update_email.new_email},
             ],
@@ -201,11 +198,10 @@ def verify_user_attribute_email(credentials: LoginRequestBody, code: VerifyUserA
     - A dictionary with an "error" key containing an error message if the verification fails.
     """
 
-    client = boto3.client("cognito-idp", region_name=REGION)
     tokens = authenticate_user(credentials)
 
     try:
-        response = client.verify_user_attribute(
+        response = cognito_idp.verify_user_attribute(
             AttributeName="email",
             Code=code.confirmation_code,
             AccessToken=tokens["access_token"],
