@@ -21,7 +21,7 @@
 # SOFTWARE.
 from contextlib import contextmanager
 from os import environ
-from typing import Self
+from typing import Iterator, Self
 
 import boto3
 from botocore.exceptions import ClientError
@@ -61,7 +61,7 @@ http_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 @contextmanager
-def cognito_idp_exception_handler():
+def cognito_idp_exception_handler() -> Iterator[None]:
     """Context manager to handle exceptions raised by the Cognito Identity Provider.
 
     This context manager catches `botocore.exceptions.ClientError` and
@@ -160,7 +160,9 @@ class PatchUserRequestBody(BaseModel):
 
 
 @app.patch("/user", status_code=204)
-async def update_user(body: PatchUserRequestBody = Body(), access_token: str = Depends(get_token)):
+async def update_user(
+    body: PatchUserRequestBody = Body(), access_token: str = Depends(get_token)
+) -> Response:
     """Update user attributes.
 
     This end point updates the user attributes like name, email, and password.
@@ -204,7 +206,7 @@ class PostConfirmRequestBody(BaseModel):
 async def verify_user_attribute_email(
     code: PostConfirmRequestBody,
     access_token: str = Depends(get_token),
-):
+) -> Response:
     """Verifies the user's email attribute in Amazon Cognito User Pools."""
     with cognito_idp_exception_handler():
         cognito_idp.verify_user_attribute(
