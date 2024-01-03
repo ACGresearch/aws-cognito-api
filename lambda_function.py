@@ -9,30 +9,15 @@
 import os
 import boto3
 from botocore.exceptions import ClientError
+from pydantic import BaseModel, EmailStr
 
 REGION = os.environ["REGION"]
 CLIENT_ID = os.environ["CLIENT_ID"]
 
 
-class LoginRequestBody:
-    """
-    Represents user credentials for authentication.
-
-    Attributes:
-    - `email`: A string representing the user's email address.
-    - `password`: A string representing the user's password.
-    """
-
-    def __init__(self, email, password):
-        """
-        Initializes a new instance of the LoginRequestBody class.
-
-        Parameters:
-        - `email`: A string representing the user's email address.
-        - `password`: A string representing the user's password.
-        """
-        self.email = email
-        self.password = password
+class LoginRequestBody(BaseModel):
+    email: EmailStr
+    password: str
 
 
 def authenticate_user(credentials: LoginRequestBody):
@@ -74,26 +59,9 @@ def authenticate_user(credentials: LoginRequestBody):
     }
 
 
-class PasswordChangeRequestBody:
-    """
-    Represents the information needed to change a user's password.
-
-    Attributes:
-    - `previous_password`: A string representing the user's previous password.
-    - `proposed_password`: A string representing the new password proposed by the user.
-    """
-
-    def __init__(self, previous_password, proposed_password):
-        """
-        Initializes a new instance of the PasswordChangeRequestBody class.
-
-        Parameters:
-        - `previous_password`: A string representing the user's previous password.
-        - `proposed_password`: A string representing the new password proposed by the user.
-        """
-
-        self.previous_password = previous_password
-        self.proposed_password = proposed_password
+class PasswordChangeRequestBody(BaseModel):
+    previous_password: str
+    proposed_password: str
 
 
 def password_change(credentials: LoginRequestBody, body: PasswordChangeRequestBody):
@@ -128,8 +96,7 @@ def password_change(credentials: LoginRequestBody, body: PasswordChangeRequestBo
 
 
 class UpdateNameRequestBody:
-    def __init__(self, new_name):
-        self.new_name = new_name
+    new_name: str
 
 
 def update_user_attribute_name(
@@ -165,22 +132,7 @@ def update_user_attribute_name(
 
 
 class UpdateEmailRequestBody:
-    """
-    Represents the information needed to update a user's email attribute.
-
-    Attributes:
-    - `new_email`: A string representing the new email to be associated with the user.
-    """
-
-    def __init__(self, new_email):
-        """
-        Initializes a new instance of the UpdateEmailRequestBody class.
-
-        Parameters:
-        - `new_email`: A string representing the new email to be associated with the user.
-        """
-
-        self.new_email = new_email
+    new_email: str
 
 
 def update_user_attribute_email(
@@ -216,22 +168,7 @@ def update_user_attribute_email(
 
 
 class VerifyUserAttribute:
-    """
-    Represents the information needed to verify a user's attribute.
-
-    Attributes:
-    - `confirmation_code`: A string representing the confirmation code.
-    """
-
-    def __init__(self, confirmation_code):
-        """
-        Initializes a new instance of the VerifyUserAttribute class.
-
-        Parameters:
-        - `confirmation_code`: A string representing the confirmation code.
-        """
-
-        self.confirmation_code = confirmation_code
+    confirmation_code: str
 
 
 def verify_user_attribute_email(
@@ -264,23 +201,3 @@ def verify_user_attribute_email(
 
     return response["ResponseMetadata"]["HTTPStatusCode"]
 
-
-def delete_user(credentials: LoginRequestBody):
-    """
-    Delete Users
-
-    :param credentials: An instance of LoginRequestBody containing user credentials.
-    :return: A dictionary containing the response status code or an error message.
-
-    """
-    client = boto3.client("cognito-idp", region_name=REGION)
-    tokens = authenticate_user(credentials)
-
-    try:
-        response = client.delete_user(
-            AccessToken=tokens["access_token"],
-        )
-    except ClientError as e:
-        return {"error": str(e)}
-
-    return response["ResponseMetadata"]["HTTPStatusCode"]
