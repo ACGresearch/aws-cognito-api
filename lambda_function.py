@@ -32,10 +32,6 @@ from pydantic import BaseModel, EmailStr, model_validator
 from starlette.responses import Response
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_422_UNPROCESSABLE_ENTITY
 
-REGION = environ["REGION"]
-CLIENT_ID = environ["CLIENT_ID"]
-
-
 # Initialize Sentry
 if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
     import sentry_sdk
@@ -47,9 +43,6 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
         traces_sample_rate=environ.get("SENTRY_TRACES_SAMPLE_RATE", 1.0),
         profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
     )
-
-# Initialize Amazon Cognito User Pools
-cognito_idp = boto3.client("cognito-idp", region_name=REGION)
 
 # Initialize FastAPI
 app = FastAPI(
@@ -141,6 +134,7 @@ class PatchUserRequestBody(BaseModel):
     proposed_password: str | None = None
     new_name: str | None = None
     new_email: EmailStr | None = None
+    region_name: str
 
     @model_validator(mode="after")
     def check_attribute_combination(self) -> Self:
@@ -170,6 +164,7 @@ async def update_user(
     If the proposed_password is not provided, it will update the user's name
     and/or email.
     """
+    cognito_idp = boto3.client("cognito-idp", region_name=body.region_name)
     with cognito_idp_exception_handler():
         # Check if proposed_password is provided
         if body.proposed_password is not None:
@@ -199,19 +194,21 @@ async def update_user(
 
 
 class PostConfirmRequestBody(BaseModel):
+    region_name: str
     confirmation_code: str
 
 
 @app.post("/user/confirm", status_code=204)
 async def verify_user_attribute_email(
-    code: PostConfirmRequestBody,
+    body: PostConfirmRequestBody,
     access_token: str = Depends(get_token),
 ) -> Response:
     """Verifies the user's email attribute in Amazon Cognito User Pools."""
+    cognito_idp = boto3.client("cognito-idp", region_name=body.region_name)
     with cognito_idp_exception_handler():
         cognito_idp.verify_user_attribute(
             AttributeName="email",
-            Code=code.confirmation_code,
+            Code=body.confirmation_code,
             AccessToken=access_token,
         )
 
