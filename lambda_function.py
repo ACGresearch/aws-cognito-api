@@ -208,6 +208,53 @@ def get_token_region(claims: dict = Depends(get_token_claims)) -> str:
     return match["region"]
 
 
+def get_token_scope(claims: dict = Depends(get_token_claims)) -> set[str]:
+    """Returns the scope of the token.
+
+    This function takes the claims (payload) of a token as input and returns
+    the scope of the token.
+
+    :returns The scope of the token.
+    :raises HTTPException 403: If the token is invalid or the scope cannot
+        be extracted.
+    """
+    try:
+        scope = claims["scope"]
+    except KeyError:
+        # If the scope claim is missing, it means the token is not valid.
+        # In this case, we raise an HTTPException with status code 403
+        # (Forbidden) and detail message "Invalid access token".
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Invalid access token")
+
+    if not isinstance(scope, str):
+        # If the scope claim is not a string, it means the token is not valid.
+        # In this case, we raise an HTTPException with status code 403
+        # (Forbidden) and detail message "Invalid access token".
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Invalid access token")
+
+    # return the scope as a set.
+    return set(scope.split(" "))
+
+
+def has_useradmin_scope(scope: set[str] = Depends(get_token_scope)) -> None:
+    """Checks if the token has the user/admin scope.
+
+    This function takes the scope of a token as input and checks if the token
+    has the user/admin scope. If the token does not have the user/admin scope,
+    it raises an HTTPException with status code 403 (Forbidden) and detail
+    message "Not authorized".
+
+    :param scope: The scope of the token.
+    :return: None
+    :raises HTTPException 403: If the token does not have the user/admin scope.
+    """
+    if "aws.cognito.signin.user.admin" not in scope:
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail='Access token is missing "aws.cognito.signin.user.admin" scope',
+        )
+
+
 class PatchUserRequestBody(BaseModel):
     previous_password: str | None = None
     proposed_password: str | None = None
@@ -231,7 +278,7 @@ class PatchUserRequestBody(BaseModel):
         return self
 
 
-@app.patch("/user", status_code=204)
+@app.patch("/user", status_code=204, dependencies=[Depends(has_useradmin_scope)])
 async def update_user(
     body: PatchUserRequestBody = Body(),
     access_token: str = Depends(get_token),
@@ -277,7 +324,7 @@ class PostConfirmRequestBody(BaseModel):
     confirmation_code: str
 
 
-@app.post("/user/confirm", status_code=204)
+@app.post("/user/confirm", status_code=204, dependencies=[Depends(has_useradmin_scope)])
 async def verify_user_attribute_email(
     body: PostConfirmRequestBody,
     access_token: str = Depends(get_token),
