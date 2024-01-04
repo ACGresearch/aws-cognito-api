@@ -19,6 +19,9 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import json
+import re
+from base64 import b64decode
 from contextlib import contextmanager
 from os import environ
 from typing import Iterator, Self
@@ -43,6 +46,10 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
         traces_sample_rate=environ.get("SENTRY_TRACES_SAMPLE_RATE", 1.0),
         profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
     )
+
+COGNITO_ISS_REGEX = re.compile(
+    r"^https://cognito-idp\.(?P<region>[a-z0-9-]+)\.amazonaws\.com/(?P<user_pool_id>[a-zA-Z0-9_\-]+)$"
+)
 
 # Initialize FastAPI
 app = FastAPI(
@@ -129,12 +136,83 @@ def get_token(
     return credentials
 
 
+def get_token_claims(access_token: str = Depends(get_token)) -> dict:
+    """This function takes an access token as input and returns the claims
+    (payload) of the token.
+
+    :returns The claims (payload) of the token.
+    :raises HTTPException 403: If the token is invalid.
+    """
+    try:
+        # The access token is a JWT (JSON Web Token) which consists of three
+        # parts: header, claims (payload), and signature. Here we're splitting
+        # the token into its three parts.
+        jwt = access_token.encode("utf-8")
+        _, claims_segment, _ = jwt.split(b".", 3)
+
+        # The claims segment may have padding at the end. Here we're adding
+        # padding if necessary to ensure that the length is a multiple of 4.
+        claims_segment_remainder = len(claims_segment) % 4
+        if claims_segment_remainder > 0:
+            claims_segment += b"=" * (4 - claims_segment_remainder)
+
+        # The claims segment is base64url encoded. Here we're replacing the
+        # characters that are different between base64 and base64url and
+        # then decoding it to get the original claims.
+        b64encoded_claims_segment = claims_segment.replace(b"-", b"+").replace(b"_", b"/")
+        decoded_claims_segment = b64decode(b64encoded_claims_segment).decode("utf-8")
+
+        # The decoded claims segment is a JSON string. Here we're parsing it
+        # to get the actual claims (payload) of the token.
+        claims = json.loads(decoded_claims_segment)
+
+        # The claims should be a dictionary. If it's not, it means that the
+        # token is not valid.
+        if not isinstance(claims, dict):
+            raise ValueError("claims is not a dict")
+    except ValueError:
+        # If an error occurs during the above process, it means that the
+        # token is not valid. In this case, we're raising an HTTP exception
+        # with status code 403 (Forbidden) and a detail message.
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Invalid access token")
+
+    # If everything is successful, we're returning the claims (payload) of
+    # the token.
+    return claims
+
+
+def get_token_region(claims: dict = Depends(get_token_claims)) -> str:
+    """Returns the region name of the user pool that issued the token.
+
+    This function takes the claims (payload) of a token as input and returns
+    the region name of the user pool that issued the token.
+
+    :returns The region name of the user pool that issued the token.
+    :raises HTTPException 403: If the token is invalid or the region cannot
+        be extracted.
+    """
+    # The iss claim of the token is the issuer URL of the user pool that
+    # issued the token. The URL is in the format
+    # https://cognito-idp.<region>.amazonaws.com/<user_pool_id>.
+    # Here we're extracting the region name from the URL.
+    match = COGNITO_ISS_REGEX.fullmatch(claims["iss"])
+
+    # If the match is None, it means the iss claim is not in the expected format.
+    # In this case, we raise an HTTPException with status code 403 (Forbidden)
+    # and detail message "Invalid access token".
+    if match is None:
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Invalid access token")
+
+    # If the match is successful, we return the region name. The region name
+    # is captured in the "region" group of the match object.
+    return match["region"]
+
+
 class PatchUserRequestBody(BaseModel):
     previous_password: str | None = None
     proposed_password: str | None = None
     new_name: str | None = None
     new_email: EmailStr | None = None
-    region_name: str
 
     @model_validator(mode="after")
     def check_attribute_combination(self) -> Self:
@@ -155,7 +233,9 @@ class PatchUserRequestBody(BaseModel):
 
 @app.patch("/user", status_code=204)
 async def update_user(
-    body: PatchUserRequestBody = Body(), access_token: str = Depends(get_token)
+    body: PatchUserRequestBody = Body(),
+    access_token: str = Depends(get_token),
+    region_name: str = Depends(get_token_region),
 ) -> Response:
     """Update user attributes.
 
@@ -164,7 +244,7 @@ async def update_user(
     If the proposed_password is not provided, it will update the user's name
     and/or email.
     """
-    cognito_idp = boto3.client("cognito-idp", region_name=body.region_name)
+    cognito_idp = boto3.client("cognito-idp", region_name=region_name)
     with cognito_idp_exception_handler():
         # Check if proposed_password is provided
         if body.proposed_password is not None:
@@ -194,7 +274,6 @@ async def update_user(
 
 
 class PostConfirmRequestBody(BaseModel):
-    region_name: str
     confirmation_code: str
 
 
@@ -202,9 +281,10 @@ class PostConfirmRequestBody(BaseModel):
 async def verify_user_attribute_email(
     body: PostConfirmRequestBody,
     access_token: str = Depends(get_token),
+    region_name: str = Depends(get_token_region),
 ) -> Response:
     """Verifies the user's email attribute in Amazon Cognito User Pools."""
-    cognito_idp = boto3.client("cognito-idp", region_name=body.region_name)
+    cognito_idp = boto3.client("cognito-idp", region_name=region_name)
     with cognito_idp_exception_handler():
         cognito_idp.verify_user_attribute(
             AttributeName="email",
