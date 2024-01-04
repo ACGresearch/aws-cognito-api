@@ -256,22 +256,22 @@ def has_useradmin_scope(scope: set[str] = Depends(get_token_scope)) -> None:
 
 
 class PatchUserRequestBody(BaseModel):
-    previous_password: str | None = None
-    proposed_password: str | None = None
-    new_name: str | None = None
-    new_email: EmailStr | None = None
+    previousPassword: str | None = None
+    proposedPassword: str | None = None
+    name: str | None = None
+    email: EmailStr | None = None
 
     @model_validator(mode="after")
     def check_attribute_combination(self) -> Self:
-        if self.proposed_password is not None:
-            if self.previous_password is None:
+        if self.proposedPassword is not None:
+            if self.previousPassword is None:
                 raise ValueError("previous password is required")
-            if self.new_name is not None or self.new_email is not None:
+            if self.name is not None or self.email is not None:
                 raise ValueError("cannot change name or email when changing password")
         else:
-            if self.new_name is None and self.new_email is None:
+            if self.name is None and self.email is None:
                 raise ValueError("at least one of name or email is required")
-            if self.previous_password is not None:
+            if self.previousPassword is not None:
                 raise ValueError(
                     "previous password should only be specified when changing password"
                 )
@@ -294,22 +294,22 @@ async def update_user(
     cognito_idp = boto3.client("cognito-idp", region_name=region_name)
     with cognito_idp_exception_handler():
         # Check if proposed_password is provided
-        if body.proposed_password is not None:
+        if body.proposedPassword is not None:
             # If proposed_password is provided, change the user's password
             cognito_idp.change_password(
-                PreviousPassword=body.previous_password,
-                ProposedPassword=body.proposed_password,
+                PreviousPassword=body.previousPassword,
+                ProposedPassword=body.proposedPassword,
                 AccessToken=access_token,
             )
         else:
             # If proposed_password is not provided, update user's name and/or email
             user_attributes = []
-            if body.new_name is not None:
+            if body.name is not None:
                 # If new_name is provided, add it to the user_attributes list
-                user_attributes.append({"Name": "name", "Value": body.new_name})
-            if body.new_email is not None:
+                user_attributes.append({"Name": "name", "Value": body.name})
+            if body.email is not None:
                 # If new_email is provided, add it to the user_attributes list
-                user_attributes.append({"Name": "email", "Value": body.new_email})
+                user_attributes.append({"Name": "email", "Value": body.email})
             # Update the user attributes
             cognito_idp.update_user_attributes(
                 UserAttributes=user_attributes,
@@ -321,7 +321,7 @@ async def update_user(
 
 
 class PostConfirmRequestBody(BaseModel):
-    confirmation_code: str
+    confirmationCode: str
 
 
 @app.post("/user/confirm", status_code=204, dependencies=[Depends(has_useradmin_scope)])
@@ -335,7 +335,7 @@ async def verify_user_attribute_email(
     with cognito_idp_exception_handler():
         cognito_idp.verify_user_attribute(
             AttributeName="email",
-            Code=body.confirmation_code,
+            Code=body.confirmationCode,
             AccessToken=access_token,
         )
 
