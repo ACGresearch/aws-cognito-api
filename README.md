@@ -33,8 +33,6 @@ To deploy and run this project, you will need:
 3. Configure environment variables:
 
    ```bash
-   export REGION='your-aws-region'
-   export CLIENT_ID='your-cognito-app-client-id'
    # Optionally, configure for Sentry
    export SENTRY_DSN='your-sentry-dsn'
    ```
