@@ -47,6 +47,9 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
         profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
     )
 
+SELF_MANAGEMENT_SCOPE = "aws.cognito.signin.user.admin"
+
+
 COGNITO_ISS_REGEX = re.compile(
     r"^https://cognito-idp\.(?P<region>[a-z0-9-]+)\.amazonaws\.com/(?P<user_pool_id>[a-zA-Z0-9_\-]+)$"
 )
@@ -236,22 +239,23 @@ def get_token_scope(claims: dict = Depends(get_token_claims)) -> set[str]:
     return set(scope.split(" "))
 
 
-def has_useradmin_scope(scope: set[str] = Depends(get_token_scope)) -> None:
-    """Checks if the token has the user/admin scope.
+def has_selfmanagement_scope(scope: set[str] = Depends(get_token_scope)) -> None:
+    """Checks if the token has the required self-management scope.
 
     This function takes the scope of a token as input and checks if the token
-    has the user/admin scope. If the token does not have the user/admin scope,
-    it raises an HTTPException with status code 403 (Forbidden) and detail
-    message "Not authorized".
+    has therequired self-management scope. If the token does not have the
+    required self-management scope, it raises an HTTPException with status
+    code 403 (Forbidden) and detail message "Not authorized".
 
-    :param scope: The scope of the token.
-    :return: None
     :raises HTTPException 403: If the token does not have the user/admin scope.
     """
-    if "aws.cognito.signin.user.admin" not in scope:
+    # Check if the user/admin scope is present in the token scope
+    if SELF_MANAGEMENT_SCOPE not in scope:
+        # If the user/admin scope is not present, raise an HTTPException
+        # with status code 403 (Forbidden) and a detail message
         raise HTTPException(
             status_code=HTTP_403_FORBIDDEN,
-            detail='Access token is missing "aws.cognito.signin.user.admin" scope',
+            detail=f'Access token is missing "{SELF_MANAGEMENT_SCOPE}" scope',
         )
 
 
@@ -278,7 +282,7 @@ class PatchUserRequestBody(BaseModel):
         return self
 
 
-@app.patch("/user", status_code=204, dependencies=[Depends(has_useradmin_scope)])
+@app.patch("/user", status_code=204, dependencies=[Depends(has_selfmanagement_scope)])
 async def update_user(
     body: PatchUserRequestBody = Body(),
     access_token: str = Depends(get_token),
@@ -324,7 +328,7 @@ class PostConfirmRequestBody(BaseModel):
     confirmationCode: str
 
 
-@app.post("/user/confirm", status_code=204, dependencies=[Depends(has_useradmin_scope)])
+@app.post("/user/confirm", status_code=204, dependencies=[Depends(has_selfmanagement_scope)])
 async def verify_user_attribute_email(
     body: PostConfirmRequestBody,
     access_token: str = Depends(get_token),
