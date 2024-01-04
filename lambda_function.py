@@ -47,19 +47,22 @@ if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
         profiles_sample_rate=environ.get("SENTRY_PROFILES_SAMPLE_RATE", 1.0),
     )
 
+
+# Scope required for self-management
 SELF_MANAGEMENT_SCOPE = "aws.cognito.signin.user.admin"
 
 
+# Cognito Identity Provider issuer URL regex
 COGNITO_ISS_REGEX = re.compile(
     r"^https://cognito-idp\.(?P<region>[a-z0-9-]+)\.amazonaws\.com/(?P<user_pool_id>[a-zA-Z0-9_\-]+)$"
 )
 
-# Initialize FastAPI
-app = FastAPI(
-    title="AWS Cognito API",
-    docs_url="/",
-)
 
+# Initialize FastAPI
+app = FastAPI(title="AWS Cognito API", docs_url="/")
+
+
+# Initialize Bearer token authentication scheme
 http_bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -247,7 +250,7 @@ def has_selfmanagement_scope(scope: set[str] = Depends(get_token_scope)) -> None
     required self-management scope, it raises an HTTPException with status
     code 403 (Forbidden) and detail message "Not authorized".
 
-    :raises HTTPException 403: If the token does not have the user/admin scope.
+    :raises HTTPException 403: Token does not have the self-management scope.
     """
     # Check if the user/admin scope is present in the token scope
     if SELF_MANAGEMENT_SCOPE not in scope:
@@ -260,6 +263,8 @@ def has_selfmanagement_scope(scope: set[str] = Depends(get_token_scope)) -> None
 
 
 class PatchUserRequestBody(BaseModel):
+    """Request body for the PATCH /user endpoint."""
+
     previousPassword: str | None = None
     proposedPassword: str | None = None
     name: str | None = None
@@ -291,8 +296,8 @@ async def update_user(
     """Update user attributes.
 
     This end point updates the user attributes like name, email, and password.
-    If the proposed_password is provided, it will change the user's password.
-    If the proposed_password is not provided, it will update the user's name
+    If the proposedPassword is provided, it will change the user's password.
+    If the proposedPassword is not provided, it will update the user's name
     and/or email.
     """
     cognito_idp = boto3.client("cognito-idp", region_name=region_name)
@@ -325,6 +330,8 @@ async def update_user(
 
 
 class PostConfirmRequestBody(BaseModel):
+    """Request body for the POST /user/confirm endpoint."""
+
     confirmationCode: str
 
 
@@ -335,7 +342,12 @@ async def verify_user_attribute_email(
     region_name: str = Depends(get_token_region),
 ) -> Response:
     """Verifies the user's email attribute in Amazon Cognito User Pools."""
+    # Create a client for Amazon Cognito User Pools
     cognito_idp = boto3.client("cognito-idp", region_name=region_name)
+
+    # Use the client to verify the user's email attribute
+    # The verification code is obtained from the request body
+    # The access token is used for authentication
     with cognito_idp_exception_handler():
         cognito_idp.verify_user_attribute(
             AttributeName="email",
@@ -343,6 +355,7 @@ async def verify_user_attribute_email(
             AccessToken=access_token,
         )
 
+    # Return a response with a status code of 204 (no content)
     return Response(status_code=204)
 
 
