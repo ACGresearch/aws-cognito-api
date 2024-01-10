@@ -15,6 +15,13 @@ To deploy and run this project, you will need:
 - Python 3.12 or higher
 - An AWS account with access to AWS Cognito
 
+## Configuration
+
+To accommodate different environments, such as when running locally vs deploying to AWS Lambda with API Gateway, the following environment variable can be set:
+
+- `API_GATEWAY_BASE_PATH`: Specifies the base path for the API when using API Gateway. This is important for routing to work correctly when the API is not deployed at the root path. If not set, the default value is `/`.
+- `SENTRY_DSN`: Specifies the DSN for Sentry error tracking. If not set, Sentry will not be used.
+
 ## Testing
 
 1. Clone the repository:
@@ -33,6 +40,9 @@ To deploy and run this project, you will need:
 3. Configure environment variables:
 
    ```bash
+   # Optionally, configure the API Gateway base path if deployed behind API Gateway with a custom base path
+   export API_GATEWAY_BASE_PATH='/prod'
+   
    # Optionally, configure for Sentry
    export SENTRY_DSN='your-sentry-dsn'
    ```
@@ -60,10 +70,11 @@ To update user data, send a `PATCH` request to `/user` endpoint with the `access
 
 Send a `POST` request to `/user/confirm` with the `confirmation_code` and `access_token` to verify a user's email attribute.
 
-
 ## Deployment
 
 The project includes a `build_package.sh` script to package the Lambda function for deployment, as well as an `update_function.sh` script to update the function code in AWS. Ensure you have set the correct `_function_name` in the `update_function.sh` script.
+
+Before deploying, ensure that you set the `API_GATEWAY_BASE_PATH` environment variable if your API is hosted at a non-root path on API Gateway.
 
 After any changes to the Lambda code, run the following script:
 

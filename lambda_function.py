@@ -35,6 +35,8 @@ from pydantic import BaseModel, EmailStr, model_validator
 from starlette.responses import Response
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_422_UNPROCESSABLE_ENTITY
 
+API_GATEWAY_BASE_PATH = environ.get("API_GATEWAY_BASE_PATH", "/")
+
 # Initialize Sentry
 if (SENTRY_DSN := environ.get("SENTRY_DSN", None)) is not None:
     import sentry_sdk
@@ -59,7 +61,11 @@ COGNITO_ISS_REGEX = re.compile(
 
 
 # Initialize FastAPI
-app = FastAPI(title="AWS Cognito API", docs_url="/")
+app = FastAPI(
+    title="AWS Cognito API",
+    docs_url="/",
+    root_path=API_GATEWAY_BASE_PATH,
+)
 
 
 # Initialize Bearer token authentication scheme
@@ -360,7 +366,11 @@ async def verify_user_attribute_email(
 
 
 # Setup lambda handler
-lambda_handler = Mangum(app, lifespan="off")
+lambda_handler = Mangum(
+    app,
+    lifespan="off",
+    api_gateway_base_path=API_GATEWAY_BASE_PATH,
+)
 
 if __name__ == "__main__":
     # noinspection PyPackageRequirements
